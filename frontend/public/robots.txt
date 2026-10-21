@@ -1,0 +1,14 @@
+# Kidora — robots.txt
+# Les pages privées ne sont pas indexées.
+
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /parent
+Disallow: /profile
+Disallow: /settings
+Disallow: /favorites
+Disallow: /api/
+
+# ⚠️ Remplacer kidora.example par ton vrai domaine après déploiement
+Sitemap: https://kidora.example/sitemap.xml

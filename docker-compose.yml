@@ -1,0 +1,89 @@
+# ══════════════════════════════════════════════════════════════════
+#  KIDORA — Docker Compose (production & test local)
+#
+#  Services :  nginx → (frontend + backend) → postgres
+#
+#  Usage :
+#    1. cp .env.example .env   (puis remplir les valeurs)
+#    2. docker compose up -d --build
+#       → le schéma est synchronisé automatiquement au démarrage :
+#         migrate deploy si backend/prisma/migrations existe, sinon db push
+#    3. docker compose exec backend npm run seed
+# ══════════════════════════════════════════════════════════════════
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kidora-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kidora}
+      POSTGRES_USER: ${POSTGRES_USER:-kidora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requis dans .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kidora} -d ${POSTGRES_DB:-kidora}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [kidora]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kidora-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-kidora}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-kidora}
+      # true uniquement derrière HTTPS (voir .env) — laisser false en test local
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "if [ -d prisma/migrations ]; then npx prisma migrate deploy; else echo 'Pas de migration versionnee - synchronisation du schema (db push)...' && npx prisma db push --skip-generate; fi && node dist/server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: [kidora]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kidora-frontend
+    restart: unless-stopped
+    depends_on: [backend]
+    networks: [kidora]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: kidora-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/certs:/etc/nginx/certs:ro
+      - ./docker/nginx/www:/var/www/certbot:ro
+    depends_on:
+      - frontend
+      - backend
+    networks: [kidora]
+
+volumes:
+  pgdata:
+    name: kidora-pgdata
+
+networks:
+  kidora:
+    name: kidora-network

@@ -1,0 +1,497 @@
+// ══════════════════════════════════════════════════════════════════
+//  KIDORA — Schéma de base de données (PostgreSQL + Prisma)
+//
+//  Principes :
+//   • IDs = CUID (non énumérables → protection anti-IDOR)
+//   • Soft delete (deleted_at) + purge RGPD sur demande
+//   • Les scores ne sont JAMAIS écrits directement par le client :
+//     ils passent par game_sessions (start → finish validé serveur)
+//   • Classements = pseudonymes uniquement (display_name)
+// ══════════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  ENUMS
+// ─────────────────────────────────────────────────────────────────
+
+enum Role {
+  PARENT
+  CHILD
+  ADMIN
+}
+
+enum AgeTier {
+  AGE_3_5
+  AGE_6_8
+  AGE_9_12
+  AGE_13_PLUS
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum SessionStatus {
+  ACTIVE
+  FINISHED
+  ABANDONED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  EXPIRED
+  PAST_DUE
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+}
+
+enum BillingProvider {
+  STRIPE
+  DEMO
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum SecurityLogType {
+  LOGIN_FAILED
+  LOGIN_LOCKED
+  BRUTE_FORCE_SUSPECTED
+  SCORE_ANOMALY
+  SESSION_ANOMALY
+  RATE_LIMIT
+  PASSWORD_RESET
+  ACCOUNT_CREATED
+  RGPD_EXPORT
+  RGPD_DELETE
+  ADMIN_ACTION
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  UTILISATEURS (comptes : parent / enfant autonome / admin)
+// ─────────────────────────────────────────────────────────────────
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String?   @unique
+  passwordHash       String?   @map("password_hash")
+  role               Role      @default(PARENT)
+  displayName        String    @map("display_name")
+  avatar             String    @default("🦊")
+  birthYear          Int?      @map("birth_year")
+  ageTier            AgeTier?  @map("age_tier")
+  xp                 Int       @default(0)
+  level              Int       @default(1)
+  points             Int       @default(0)
+  isActive           Boolean   @default(true) @map("is_active")
+  leaderboardOptIn   Boolean   @default(true) @map("leaderboard_opt_in")
+  consentAcceptedAt  DateTime? @map("consent_accepted_at")
+  failedLogins       Int       @default(0) @map("failed_logins")
+  lockedUntil        DateTime? @map("locked_until")
+  tokensValidAfter   DateTime? @map("tokens_valid_after")
+  activeProfileId    String?   @map("active_profile_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  profiles        Profile[]        @relation("OwnerProfiles")
+  refreshTokens   RefreshToken[]
+  guardianLinks   ParentChild[]    @relation("GuardianLinks")
+  passwordResets  PasswordReset[]
+  securityLogs    SecurityLog[]
+  subscription    Subscription?
+  payments        Payment[]
+
+  @@index([role, isActive])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  PROFILS JOUEURS (un utilisateur a ≥ 1 profil ; parent → N enfants)
+// ─────────────────────────────────────────────────────────────────
+
+model Profile {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  displayName      String   @map("display_name")
+  avatar           String   @default("🐼")
+  ageTier          AgeTier  @default(AGE_6_8) @map("age_tier")
+  xp               Int      @default(0)
+  level            Int      @default(1)
+  points           Int      @default(0)
+  leaderboardOptIn Boolean  @default(true) @map("leaderboard_opt_in")
+  pinHash          String?  @map("pin_hash")
+  isActive         Boolean  @default(true) @map("is_active")
+  isDefault        Boolean  @default(false) @map("is_default")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user            User              @relation("OwnerProfiles", fields: [userId], references: [id], onDelete: Cascade)
+  guardianLinks   ParentChild[]     @relation("ChildProfileLinks")
+  scores          Score[]
+  sessions        GameSession[]
+  progress        Progress[]
+  favorites       Favorite[]
+  achievements    UserAchievement[]
+
+  @@index([userId])
+  @@index([points(sort: Desc)])
+  @@map("profiles")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  LIEN PARENT ↔ ENFANT (un enfant peut avoir plusieurs tuteurs)
+// ─────────────────────────────────────────────────────────────────
+
+model ParentChild {
+  id        String   @id @default(cuid())
+  parentId  String   @map("parent_id")
+  profileId String   @map("profile_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  parent  User    @relation("GuardianLinks", fields: [parentId], references: [id], onDelete: Cascade)
+  profile Profile @relation("ChildProfileLinks", fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, profileId])
+  @@map("parent_child")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  CATÉGORIES DE JEUX
+// ─────────────────────────────────────────────────────────────────
+
+model Category {
+  id        String  @id @default(cuid())
+  slug      String  @unique
+  name      String
+  emoji     String  @default("🎮")
+  color     String  @default("#6C5CE7")
+  sortOrder Int     @default(0) @map("sort_order")
+  isActive  Boolean @default(true) @map("is_active")
+
+  games Game[]
+
+  @@index([sortOrder])
+  @@map("categories")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  JEUX (catalogue — `engine` = clé du composant frontend)
+// ─────────────────────────────────────────────────────────────────
+
+model Game {
+  id           String     @id @default(cuid())
+  slug         String     @unique
+  title        String
+  description  String     @default("")
+  engine       String
+  categoryId   String     @map("category_id")
+  minAge       Int        @default(3) @map("min_age")
+  maxAge       Int?       @map("max_age")
+  difficulty   Difficulty @default(EASY)
+  emoji        String     @default("🎮")
+  color        String     @default("#6C5CE7")
+  /// Paramètres de jeu + bornes anti-cheat :
+  /// { minDurationMs: {easy,medium,hard}, maxScore: {easy,medium,hard}, levels, settings }
+  config       Json       @default("{}")
+  maxScoreHint Int        @default(1000) @map("max_score_hint")
+  /// Jeu réservé aux abonnés Premium (vérifié côté serveur)
+  premium      Boolean    @default(false)
+  isPublished  Boolean    @default(true) @map("is_published")
+  playCount    Int        @default(0) @map("play_count")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  category   Category        @relation(fields: [categoryId], references: [id])
+  scores     Score[]
+  sessions   GameSession[]
+  progress   Progress[]
+  favorites  Favorite[]
+  achievements UserAchievement[]
+
+  @@index([categoryId])
+  @@index([isPublished, playCount(sort: Desc)])
+  @@index([minAge])
+  @@map("games")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  SESSIONS DE JEU (anti-cheat : start → finish validé serveur)
+// ─────────────────────────────────────────────────────────────────
+
+model GameSession {
+  id           String        @id @default(cuid())
+  profileId    String        @map("profile_id")
+  gameId       String        @map("game_id")
+  difficulty   Difficulty    @default(EASY)
+  status       SessionStatus @default(ACTIVE)
+  startedAt    DateTime      @default(now()) @map("started_at")
+  finishedAt   DateTime?     @map("finished_at")
+  score        Int?
+  durationMs   Int?          @map("duration_ms")
+  isWin        Boolean?      @map("is_win")
+  levelReached Int?          @map("level_reached")
+  stars        Int?          @default(0) @db.SmallInt
+  clientMeta   Json?         @map("client_meta")
+  ipHash       String?       @map("ip_hash")
+  anomalyFlags Json?         @map("anomaly_flags")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  game    Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  scoreRow Score?
+
+  @@index([profileId, startedAt(sort: Desc)])
+  @@index([gameId, status])
+  @@map("game_sessions")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  SCORES VALIDÉS (historique)
+// ─────────────────────────────────────────────────────────────────
+
+model Score {
+  id         String     @id @default(cuid())
+  profileId  String     @map("profile_id")
+  gameId     String     @map("game_id")
+  sessionId  String?    @unique @map("session_id")
+  score      Int
+  durationMs Int        @map("duration_ms")
+  difficulty Difficulty @default(EASY)
+  isWin      Boolean    @default(false) @map("is_win")
+  stars      Int        @default(0) @db.SmallInt
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  profile Profile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  game    Game         @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  session GameSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([gameId, score(sort: Desc)])
+  @@index([profileId, gameId, score(sort: Desc)])
+  @@index([createdAt])
+  @@map("scores")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  PROGRESSION AGRÉGÉE (profil × jeu)
+// ─────────────────────────────────────────────────────────────────
+
+model Progress {
+  id           String    @id @default(cuid())
+  profileId    String    @map("profile_id")
+  gameId       String    @map("game_id")
+  level        Int       @default(1)
+  bestScore    Int       @default(0) @map("best_score")
+  plays        Int       @default(0)
+  wins         Int       @default(0)
+  totalTimeMs  Int       @default(0) @map("total_time_ms")
+  lastPlayedAt DateTime? @map("last_played_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  game    Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, gameId])
+  @@index([profileId, lastPlayedAt(sort: Desc)])
+  @@map("progress")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  ACHIEVEMENTS
+// ─────────────────────────────────────────────────────────────────
+
+model Achievement {
+  id          String @id @default(cuid())
+  code        String @unique
+  title       String
+  description String
+  icon        String @default("🏆")
+  category    String @default("general")
+  xpReward    Int    @default(50) @map("xp_reward")
+  /// { type: "games_finished" | "points" | "streak" | "category_wins" | "speed_win" | "distinct_games" | "perfect_stars", count?, categoryId?, maxDurationMs?, minDifficulty? }
+  criteria    Json   @default("{}")
+  sortOrder   Int    @default(0) @map("sort_order")
+
+  unlockedBy UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  profileId     String   @map("profile_id")
+  achievementId String   @map("achievement_id")
+  unlockedAt    DateTime @default(now()) @map("unlocked_at")
+  gameId        String?  @map("game_id")
+
+  profile     Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  game        Game?       @relation(fields: [gameId], references: [id], onDelete: SetNull)
+
+  @@unique([profileId, achievementId])
+  @@index([profileId, unlockedAt(sort: Desc)])
+  @@map("user_achievements")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  FAVORIS
+// ─────────────────────────────────────────────────────────────────
+
+model Favorite {
+  id        String   @id @default(cuid())
+  profileId String   @map("profile_id")
+  gameId    String   @map("game_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  game    Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, gameId])
+  @@map("favorites")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  SESSIONS / TOKENS
+// ─────────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  userAgent String?   @map("user_agent")
+  ipHash    String?   @map("ip_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  LOGS DE SÉCURITÉ (brute-force, anomalies de score, actions admin)
+// ─────────────────────────────────────────────────────────────────
+
+model SecurityLog {
+  id        String          @id @default(cuid())
+  type      SecurityLogType
+  userId    String?         @map("user_id")
+  ipHash    String?         @map("ip_hash")
+  /// Jamais de secrets ici — uniquement métadonnées d'anomalie
+  detail    Json            @default("{}")
+  createdAt DateTime        @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([type, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("security_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  ABONNEMENTS PREMIUM (Stripe + mode démo local)
+//  Un compte = au plus un abonnement actif. Les enfants rattachés à
+//  un parent abonné héritent de l'accès Premium.
+// ─────────────────────────────────────────────────────────────────
+
+model Plan {
+  id            String          @id @default(cuid())
+  slug          String          @unique
+  name          String
+  tagline       String          @default("")
+  description   String          @default("")
+  priceCents    Int             @map("price_cents")
+  currency      String          @default("EUR")
+  interval      BillingInterval @default(MONTH)
+  trialDays     Int             @default(0) @map("trial_days")
+  /// Liste de bénéfices affichés sur la page tarifs (JSON string[])
+  features      Json            @default("[]")
+  isPopular     Boolean         @default(false) @map("is_popular")
+  isActive      Boolean         @default(true) @map("is_active")
+  stripePriceId String?         @map("stripe_price_id")
+  sortOrder     Int             @default(0) @map("sort_order")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+  payments      Payment[]
+
+  @@index([isActive, sortOrder])
+  @@map("plans")
+}
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  userId                 String             @unique @map("user_id")
+  planId                 String             @map("plan_id")
+  status                 SubscriptionStatus @default(ACTIVE)
+  provider               BillingProvider    @default(DEMO)
+  providerSubscriptionId String?            @unique @map("provider_subscription_id")
+  currentPeriodStart     DateTime           @map("current_period_start")
+  currentPeriodEnd       DateTime           @map("current_period_end")
+  cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt             DateTime?          @map("canceled_at")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan     Plan      @relation(fields: [planId], references: [id])
+  payments Payment[]
+
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                String          @id @default(cuid())
+  userId            String          @map("user_id")
+  planId            String          @map("plan_id")
+  subscriptionId    String?         @map("subscription_id")
+  amountCents       Int             @map("amount_cents")
+  currency          String          @default("EUR")
+  status            PaymentStatus   @default(PENDING)
+  provider          BillingProvider @default(DEMO)
+  providerPaymentId String?         @unique @map("provider_payment_id")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan         Plan          @relation(fields: [planId], references: [id])
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("payments")
+}

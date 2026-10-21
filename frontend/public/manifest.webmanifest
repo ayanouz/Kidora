@@ -1,0 +1,28 @@
+{
+  "name": "Kidora — Jeux éducatifs pour enfants",
+  "short_name": "Kidora",
+  "description": "Des jeux amusants qui font travailler ton cerveau : puzzles, mémoire, maths, logique, arcade.",
+  "lang": "fr",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#6C5CE7",
+  "background_color": "#F7F6FF",
+  "categories": ["games", "education", "kids"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

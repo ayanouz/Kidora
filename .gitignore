@@ -1,0 +1,40 @@
+# Dépendances
+node_modules/
+.pnpm-store/
+
+# Builds
+dist/
+build/
+*.tsbuildinfo
+
+# Environnement — JAMAIS committer les secrets
+.env
+.env.local
+.env.production
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Tests
+coverage/
+playwright-report/
+test-results/
+.vitest/
+
+# Base de données
+database/backups/*.sql
+database/backups/*.gz
+!database/backups/.gitkeep
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Prisma
+backend/prisma/*.db

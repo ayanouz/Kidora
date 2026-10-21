@@ -1,0 +1,223 @@
+/* ══════════════════════════════════════════════════════════════════
+   KIDORA — Styles globaux + Design System (§47)
+   Tokens, composants de base, accessibilité, animations réduites.
+   ══════════════════════════════════════════════════════════════════ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Tokens globaux ──────────────────────────────────────────────── */
+:root {
+  --k-primary: #6c5ce7;
+  --k-primary-dark: #5546c8;
+  --k-secondary: #00b8a9;
+  --k-accent: #ffb020;
+  --k-success: #22b573;
+  --k-danger: #ff5a5f;
+  --k-warning: #ff8a3d;
+  --k-bg: #f7f6ff;
+  --k-surface: #ffffff;
+  --k-ink: #2d2a45;
+  --k-ink-soft: #6b6880;
+  --k-radius: 1rem;
+  --k-shadow: 0 6px 24px rgba(108, 92, 231, 0.12);
+  --k-shadow-pop: 0 10px 32px rgba(108, 92, 231, 0.2);
+}
+
+/* ── Base ────────────────────────────────────────────────────────── */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-page text-ink font-fun antialiased;
+    min-height: 100dvh;
+  }
+
+  /* Focus visible net partout (WCAG §32) */
+  :focus-visible {
+    outline: 3px solid var(--k-primary);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: #ddd8ff;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-fun font-bold text-ink;
+  }
+
+  /* Scrollbar discrète (desktop) */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #d6d2f0;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* Les enfants n'ont pas besoin de sélection de texte dans les jeux */
+  .no-select {
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+}
+
+/* ── Composants ──────────────────────────────────────────────────── */
+@layer components {
+  /* Boutons — hauteur ≥ 48px, gros et tactiles (§32) */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 font-fun font-semibold
+      rounded-btn px-5 min-h-[48px] cursor-pointer no-select
+      transition-all duration-150 active:scale-[0.97] disabled:opacity-50
+      disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-white shadow-inset hover:bg-primary-dark hover:shadow-pop;
+  }
+  .btn-secondary {
+    @apply bg-secondary text-white shadow-inset hover:bg-secondary-dark hover:shadow-pop;
+  }
+  .btn-success {
+    @apply bg-success text-white shadow-inset hover:brightness-95 hover:shadow-pop;
+  }
+  .btn-danger {
+    @apply bg-danger text-white shadow-inset hover:brightness-95 hover:shadow-pop;
+  }
+  .btn-accent {
+    @apply bg-accent text-ink shadow-inset hover:brightness-95 hover:shadow-pop;
+  }
+  .btn-ghost {
+    @apply bg-transparent text-primary hover:bg-primary-soft;
+  }
+  .btn-outline {
+    @apply bg-white text-primary border-2 border-primary/30 hover:border-primary hover:bg-primary-soft;
+  }
+  .btn-lg {
+    @apply text-lg px-7 min-h-[56px] rounded-[1.1rem];
+  }
+  .btn-sm {
+    @apply text-sm px-3.5 min-h-[40px] rounded-xl;
+  }
+  .btn-icon {
+    @apply p-0 min-h-0 h-12 w-12 rounded-full;
+  }
+
+  /* Cartes */
+  .card {
+    @apply bg-surface rounded-card shadow-soft border border-primary/5;
+  }
+  .card-hover {
+    @apply transition-all duration-200 hover:-translate-y-1 hover:shadow-pop;
+  }
+
+  /* Chips / badges */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold;
+  }
+
+  /* Inputs */
+  .input {
+    @apply w-full rounded-xl border-2 border-primary/15 bg-white px-4 py-3 text-base
+      font-medium text-ink placeholder:text-ink-faint outline-none
+      focus:border-primary transition-colors;
+  }
+  .input-error {
+    @apply border-danger focus:border-danger;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-ink-soft;
+  }
+
+  /* Skeleton de chargement (§49) */
+  .skeleton {
+    @apply animate-pulse rounded-xl bg-primary/10;
+  }
+
+  /* Badge étoiles */
+  .stars {
+    @apply inline-flex items-center gap-0.5 leading-none;
+  }
+
+  /* Plateau de jeu : conteneur responsive des canvas */
+  .game-board {
+    @apply relative w-full overflow-hidden rounded-card bg-white shadow-soft no-select;
+  }
+
+  /* Carte à retourner (memory / flip) */
+  .flip-scene {
+    perspective: 1000px;
+  }
+  .flip-inner {
+    transform-style: preserve-3d;
+    transition: transform 0.45s cubic-bezier(0.34, 1.3, 0.64, 1);
+  }
+  .flip-inner.is-flipped {
+    transform: rotateY(180deg);
+  }
+  .flip-face {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    position: absolute;
+    inset: 0;
+  }
+  .flip-back {
+    transform: rotateY(180deg);
+  }
+
+  /* Barre de progression animée */
+  .progress-track {
+    @apply h-3 w-full overflow-hidden rounded-full bg-primary/10;
+  }
+  .progress-fill {
+    @apply h-full rounded-full transition-[width] duration-500 ease-out;
+    background: linear-gradient(90deg, var(--k-primary), var(--k-secondary));
+  }
+
+  /* Texte équilibré */
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* ── RTL (arabe) ─────────────────────────────────────────────────── */
+[dir="rtl"] .flip-inner.is-flipped {
+  transform: rotateY(-180deg);
+}
+[dir="rtl"] .progress-fill {
+  background: linear-gradient(-90deg, var(--k-primary), var(--k-secondary));
+}
+
+/* ── Accessibilité : animations réduites (WCAG §32) ─────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .flip-inner {
+    transition: none !important;
+  }
+}
+
+/* ── Divers ──────────────────────────────────────────────────────── */
+.confetti-canvas {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+}
